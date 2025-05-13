@@ -1,0 +1,64 @@
+name: 'Magento Tests'
+description: 'This action is used to run phpunit tests.'
+author: Patryk Waluś <patryk.walus@vaimo.com>
+inputs:
+  composer-auth:
+    description: 'Content of auth.json file.'
+    required: true
+  working-directory:
+    description: 'Set working directory for your action.'
+    required: false
+  config-path:
+    description: 'Path to the phpunit.xml file.'
+    required: false
+    default: phpunit.xml
+  test-suites:
+    description: 'Test suites to be executed.'
+    required: false
+  upload-to-codacy:
+    description: 'Upload test results to Codacy.'
+    required: false
+    default: 'false'
+  codacy-token:
+    description: 'Codacy project token.'
+    required: false
+runs:
+  using: "composite"
+  steps:
+    - name: Git checkout
+      uses: vaimo/action-git-checkout@v1
+      with:
+        working-directory: ${{inputs.working-directory}}
+
+    - name: Cache Composer packages
+      uses: actions/cache@v4
+      with:
+        path: vendor
+        key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-composer-
+
+    - name: Install dependencies
+      shell: bash
+      run: COMPOSER_AUTH=${{inputs.composer-auth}} composer install --no-interaction
+
+    - name: Run tests
+      shell: bash
+      run: |
+        test_suites_option="${{ inputs.test-suites && format(' --testsuite {0}', inputs.test-suites) || '' }}"
+        test_directory="$(dirname '${{inputs.config-path}}')"
+        phpunit_config="$(basename '${{inputs.config-path}}')"
+        cd ${test_directory} && XDEBUG_MODE=coverage php $GITHUB_WORKSPACE/vendor/bin/phpunit -c ${phpunit_config} ${test_suites_option} --testdox --verbose --coverage-clover $GITHUB_WORKSPACE/coverage-clover.xml
+
+    - name: Set codacy env
+      if: ${{ always() && inputs.upload-to-codacy == 'true' }}
+      shell: bash
+      run: |
+        echo "CODACY_PROJECT_TOKEN=${{ inputs.codacy-token }}" >> $GITHUB_ENV
+
+    - name: Run codacy-coverage-reporter
+      if: ${{ always() && inputs.upload-to-codacy == 'true' }}
+      uses: codacy/codacy-coverage-reporter-action@v1.3.0
+      with:
+        project-token: ${{ inputs.codacy-token }}
+        coverage-reports: $GITHUB_WORKSPACE/coverage-clover.xml
